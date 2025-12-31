@@ -1,111 +1,132 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+import requests
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
+    ConversationHandler,
     ContextTypes,
-    ConversationFactory,
     filters
 )
 
-# Configuration
+# --- Configuration & Logging ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# Conversation States
-CITY, ADDRESS, FOOD_TYPE, DIET, MOBILE, OTP, COMPARE = range(7)
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- Step 1: Start & City ---
+# Conversation States
+CITY, ADDRESS, FOOD_TYPE, DIET, MOBILE, OTP = range(6)
+
+class SwiggyAPI:
+    """Helper class to interact with Swiggy's internal endpoints"""
+    BASE_URL = "https://www.swiggy.com/dapi"
+    
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15",
+            "Referer": "https://www.swiggy.com/"
+        })
+
+    def send_otp(self, mobile):
+        # Placeholder for Swiggy's actual Auth endpoint
+        # Example: self.session.post(f"{self.BASE_URL}/auth/sms-otp", data={"mobile": mobile})
+        return True
+
+    def verify_otp(self, otp):
+        # Placeholder for verifying and getting the session cookie
+        return True
+
+    def get_best_deal(self, food_type, city):
+        # This simulates fetching the 'Winner' restaurant by comparing discounts
+        # In a real scenario, you'd iterate through 'restaurants' -> 'offers' array
+        mock_deals = [
+            {"name": "Biryani House", "discount": 60, "coupon": "WELCOME60"},
+            {"name": "Pizza Corner", "discount": 50, "coupon": "SWIGGYIT"},
+        ]
+        return max(mock_deals, key=lambda x: x['discount'])
+
+# --- Bot Handler Functions ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🍔 *Swiggy Pro Hunter Bot*\n\nStep 1: Which *City* are you in?",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text("🍔 *Swiggy Deal Hunter*\n\nStep 1: Which *City* are you in?", parse_mode="Markdown")
     return CITY
 
-# --- Step 2: Address ---
 async def get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['city'] = update.message.text
-    await update.message.reply_text("📍 Please enter your *Full Delivery Address* (to calculate exact discounts):", parse_mode="Markdown")
+    await update.message.reply_text("📍 Please enter your *Full Delivery Address*:")
     return ADDRESS
 
-# --- Step 3: Food Type ---
 async def get_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['address'] = update.message.text
-    await update.message.reply_text("🍕 What do you want to eat? (e.g. Biryani, Pizza, North Indian):")
+    await update.message.reply_text("🍕 What would you like to eat? (e.g., Biryani, Pizza):")
     return FOOD_TYPE
 
-# --- Step 4: Veg/Non-Veg ---
 async def get_food_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['food_type'] = update.message.text
-    reply_keyboard = [['Veg Only', 'Non-Veg', 'Both']]
+    reply_keyboard = [['Veg', 'Non-Veg', 'Both']]
     await update.message.reply_text(
         "Select preference:",
         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
     return DIET
 
-# --- Step 5: Mobile Number ---
 async def get_diet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['diet'] = update.message.text
     await update.message.reply_text(
-        "📱 To find *Account-Specific Coupons* (like HDFC, ICICI, or User-Specific), please enter your Swiggy Mobile Number:",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode="Markdown"
+        "📱 Enter your Swiggy Mobile Number to find personal coupons:",
+        reply_markup=ReplyKeyboardRemove()
     )
     return MOBILE
 
-# --- Step 6: OTP (The Login Simulation) ---
 async def get_mobile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['mobile'] = update.message.text
-    # HERE: You would trigger the Swiggy Auth API to send an OTP
-    await update.message.reply_text("📩 OTP sent to your phone. Please enter it here:")
-    return OTP
+    mobile = update.message.text
+    swiggy = SwiggyAPI()
+    context.user_data['swiggy'] = swiggy
+    
+    if swiggy.send_otp(mobile):
+        await update.message.reply_text("📩 OTP sent! Enter it below:")
+        return OTP
+    else:
+        await update.message.reply_text("❌ Failed to send OTP. Try again /start")
+        return ConversationHandler.END
 
-# --- Step 7: Comparison Logic ---
 async def get_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     otp = update.message.text
-    await update.message.reply_text("🔄 *Logging in and comparing all restaurant coupons...*", parse_mode="Markdown")
+    swiggy = context.user_data['swiggy']
     
-    # SIMULATED LOGIC:
-    # 1. Fetch restaurants for 'food_type' in 'city'
-    # 2. Loop through each restaurant's 'offers' array
-    # 3. Calculate: (Discount Amount / Base Price)
+    if swiggy.verify_otp(otp):
+        await update.message.reply_text("🔍 *Scanning and comparing all restaurant deals...*", parse_mode="Markdown")
+        
+        winner = swiggy.get_best_deal(context.user_data['food_type'], context.user_data['city'])
+        
+        response = (
+            f"🏆 *WINNER FOUND!*\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"🏪 *Restaurant:* {winner['name']}\n"
+            f"🎟 *Best Coupon:* {winner['coupon']}\n"
+            f"💰 *Discount:* {winner['discount']}% OFF\n\n"
+            f"Ready to order for *{context.user_data['address']}*?"
+        )
+        await update.message.reply_text(response, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Invalid OTP. Use /start to retry.")
     
-    results = [
-        {"name": "Biryani Paradise", "coupon": "WELCOME60", "discount": "60%", "final": "₹120"},
-        {"name": "Pizza Hut", "coupon": "SWIGGYIT", "discount": "50%", "final": "₹250"},
-        {"name": "The Bowl Co", "coupon": "JUMBO", "discount": "₹100 OFF", "final": "₹180"}
-    ]
-    
-    # Finding the 'Winner' (Greatest Coupon)
-    winner = results[0] 
-
-    response = (
-        f"🏆 *WINNER RESTAURANT*\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"🏪 *Name:* {winner['name']}\n"
-        f"🎟 *Best Coupon:* {winner['coupon']}\n"
-        f"💰 *Discount:* {winner['discount']}\n"
-        f"💵 *Effective Price:* {winner['final']}\n\n"
-        f"📍 *Delivering to:* {context.user_data['address']}"
-    )
-
-    await update.message.reply_text(response, parse_mode="Markdown")
-    return ConversationFactory.END
+    return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Process cancelled. Type /start to try again.")
-    return ConversationFactory.END
+    await update.message.reply_text("Search cancelled. Type /start to search again.")
+    return ConversationHandler.END
 
 def main():
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN not found!")
+        return
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    conv_handler = ConversationFactory(
+    conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_city)],
@@ -119,7 +140,9 @@ def main():
     )
 
     app.add_handler(conv_handler)
+    print("Bot is alive...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
